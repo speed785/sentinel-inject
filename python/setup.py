@@ -28,6 +28,7 @@ setup(
         "dev": [
             "pytest>=7.0",
             "pytest-asyncio",
+            "pytest-cov",
             "black",
             "ruff",
             "mypy",
