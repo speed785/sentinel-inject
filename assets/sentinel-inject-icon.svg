@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="si-bg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#141414"/>
+      <stop offset="100%" stop-color="#0a0a0a"/>
+    </radialGradient>
+    <linearGradient id="si-shield" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff4444"/>
+      <stop offset="50%" stop-color="#ff6622"/>
+      <stop offset="100%" stop-color="#ff8800"/>
+    </linearGradient>
+    <linearGradient id="si-shield-fill" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ff4444" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#ff8800" stop-opacity="0.05"/>
+    </linearGradient>
+    <filter id="si-glow">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="si-glow-sm">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="512" height="512" rx="64" fill="url(#si-bg)"/>
+  
+  <!-- Hexagonal shield -->
+  <g transform="translate(256,248)">
+    <!-- Shield glow -->
+    <g filter="url(#si-glow)">
+      <polygon points="0,-160 139,-80 139,80 0,160 -139,80 -139,-80" 
+               fill="none" stroke="url(#si-shield)" stroke-width="3"/>
+    </g>
+    
+    <!-- Shield fill -->
+    <polygon points="0,-160 139,-80 139,80 0,160 -139,80 -139,-80" 
+             fill="url(#si-shield-fill)"/>
+    
+    <!-- Inner hexagon ring -->
+    <polygon points="0,-120 104,-60 104,60 0,120 -104,60 -104,-60" 
+             fill="none" stroke="#ff4444" stroke-width="1" opacity="0.2"/>
+    
+    <!-- Lock body -->
+    <g filter="url(#si-glow-sm)">
+      <rect x="-36" y="-10" width="72" height="56" rx="8" 
+            fill="none" stroke="#ffffff" stroke-width="3" opacity="0.9"/>
+      <rect x="-36" y="-10" width="72" height="56" rx="8" 
+            fill="#ffffff" opacity="0.08"/>
+    </g>
+    
+    <!-- Lock shackle -->
+    <path d="M-20,-10 L-20,-36 A20,20 0 0,1 20,-36 L20,-10" 
+          fill="none" stroke="#ffffff" stroke-width="3" opacity="0.9" stroke-linecap="round" filter="url(#si-glow-sm)"/>
+    
+    <!-- Lock keyhole -->
+    <circle cx="0" cy="14" r="8" fill="#ff6622" opacity="0.8"/>
+    <rect x="-3" y="14" width="6" height="16" rx="2" fill="#ff6622" opacity="0.8"/>
+    
+    <!-- Injection needle (crossed out) -->
+    <g transform="translate(70,-60) rotate(45)">
+      <!-- Needle -->
+      <rect x="-4" y="-50" width="8" height="70" rx="2" fill="#ff4444" opacity="0.6"/>
+      <polygon points="-4,20 4,20 0,32" fill="#ff4444" opacity="0.6"/>
+      <!-- Plunger -->
+      <rect x="-6" y="-60" width="12" height="4" rx="1" fill="#ff4444" opacity="0.6"/>
+      <rect x="-2" y="-70" width="4" height="14" rx="1" fill="#ff4444" opacity="0.6"/>
+    </g>
+    
+    <!-- X crossing out the needle -->
+    <g filter="url(#si-glow)">
+      <line x1="46" y1="-96" x2="106" y2="-26" stroke="#ff4444" stroke-width="4" stroke-linecap="round" opacity="0.9"/>
+      <line x1="106" y1="-96" x2="46" y2="-26" stroke="#ff4444" stroke-width="4" stroke-linecap="round" opacity="0.9"/>
+    </g>
+    
+    <!-- Corner accent dots -->
+    <circle cx="0" cy="-160" r="4" fill="#ff8800" opacity="0.7" filter="url(#si-glow-sm)"/>
+    <circle cx="139" cy="-80" r="4" fill="#ff6622" opacity="0.7" filter="url(#si-glow-sm)"/>
+    <circle cx="139" cy="80" r="4" fill="#ff4444" opacity="0.7" filter="url(#si-glow-sm)"/>
+    <circle cx="0" cy="160" r="4" fill="#ff8800" opacity="0.7" filter="url(#si-glow-sm)"/>
+    <circle cx="-139" cy="80" r="4" fill="#ff6622" opacity="0.7" filter="url(#si-glow-sm)"/>
+    <circle cx="-139" cy="-80" r="4" fill="#ff4444" opacity="0.7" filter="url(#si-glow-sm)"/>
+  </g>
+  
+  <!-- Scan lines -->
+  <g opacity="0.04">
+    <line x1="0" y1="120" x2="512" y2="120" stroke="#ff4444" stroke-width="1"/>
+    <line x1="0" y1="200" x2="512" y2="200" stroke="#ff4444" stroke-width="1"/>
+    <line x1="0" y1="310" x2="512" y2="310" stroke="#ff4444" stroke-width="1"/>
+    <line x1="0" y1="390" x2="512" y2="390" stroke="#ff4444" stroke-width="1"/>
+  </g>
+</svg>
