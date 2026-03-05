@@ -21,3 +21,4 @@ export {
   LLMDetectionResult,
   ClassifierFn,
 } from "./llmDetector";
+export { ScanLogger, ScanMetrics, AuditTrail, ScanEvent, ScanEventName } from "./observability";

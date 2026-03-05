@@ -19,7 +19,8 @@ Basic usage::
 :license: MIT, see LICENSE for more details.
 """
 
-from .scanner import Scanner, ScanResult, ThreatLevel
+from .scanner import Scanner, ScanResult, ThreatLevel, ScannerConfig
+from .observability import AuditTrail, ScanLogger, ScanMetrics
 from .rules import RuleEngine, RuleMatch
 from .sanitizer import Sanitizer, SanitizationMode
 from .middleware import Middleware, MiddlewareConfig
@@ -31,6 +32,7 @@ __license__ = "MIT"
 
 __all__ = [
     "Scanner",
+    "ScannerConfig",
     "ScanResult",
     "ThreatLevel",
     "RuleEngine",
@@ -41,4 +43,7 @@ __all__ = [
     "MiddlewareConfig",
     "LLMDetector",
     "LLMDetectorConfig",
+    "ScanLogger",
+    "ScanMetrics",
+    "AuditTrail",
 ]

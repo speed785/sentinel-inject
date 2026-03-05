@@ -27,6 +27,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional, Tuple, cast
 
+from .observability import ScanLogger
+
 logger = logging.getLogger("sentinel_inject.llm_detector")
 
 
@@ -130,6 +132,11 @@ class LLMDetector:
         self._cache: Dict[str, Tuple[float, LLMDetectionResult]] = {}
         self._cache_ttl_seconds = 300.0
         self._max_attempts = 3
+        self._scan_logger: Optional[ScanLogger] = None
+        self._default_model = "unknown"
+
+    def set_scan_logger(self, scan_logger: Optional[ScanLogger]) -> None:
+        self._scan_logger = scan_logger
 
     # ------------------------------------------------------------------
     # Factory helpers
@@ -165,7 +172,7 @@ class LLMDetector:
 
         client = openai.OpenAI(**client_kwargs)
 
-        def _call(prompt: str) -> str:
+        def _call(prompt: str) -> Dict[str, Any]:
             resp = client.chat.completions.create(
                 model=model,
                 messages=[
@@ -177,9 +184,15 @@ class LLMDetector:
                 timeout=cfg.timeout,
                 **cfg.llm_kwargs,
             )
-            return resp.choices[0].message.content or ""
+            return {
+                "text": resp.choices[0].message.content or "",
+                "tokens_used": int(getattr(resp.usage, "total_tokens", 0) or 0),
+                "model": model,
+            }
 
-        return cls(classifier_fn=_call, config=cfg)
+        instance = cls(classifier_fn=_call, config=cfg)
+        instance._default_model = model
+        return instance
 
     @classmethod
     def from_anthropic(
@@ -200,7 +213,7 @@ class LLMDetector:
         cfg = config or LLMDetectorConfig()
         client = anthropic.Anthropic(api_key=api_key)
 
-        def _call(prompt: str) -> str:
+        def _call(prompt: str) -> Dict[str, Any]:
             resp = client.messages.create(
                 model=model,
                 max_tokens=256,
@@ -208,9 +221,18 @@ class LLMDetector:
                 messages=[{"role": "user", "content": prompt}],
                 **cfg.llm_kwargs,
             )
-            return resp.content[0].text
+            tokens = int(getattr(resp.usage, "input_tokens", 0) or 0) + int(
+                getattr(resp.usage, "output_tokens", 0) or 0
+            )
+            return {
+                "text": resp.content[0].text,
+                "tokens_used": tokens,
+                "model": model,
+            }
 
-        return cls(classifier_fn=_call, config=cfg)
+        instance = cls(classifier_fn=_call, config=cfg)
+        instance._default_model = model
+        return instance
 
     # ------------------------------------------------------------------
     # Core detection
@@ -233,6 +255,17 @@ class LLMDetector:
         cache_key = hashlib.sha256(content.encode("utf-8")).hexdigest()
         cached = self._cache.get(cache_key)
         if cached and cached[0] > now:
+            if self._scan_logger is not None:
+                self._scan_logger.llm_classified(
+                    content_hash=cache_key[:16],
+                    model=self._default_model,
+                    tokens_used=0,
+                    latency_ms=0.0,
+                    result=cached[1].is_injection,
+                    confidence=cached[1].confidence,
+                    cache_hit=True,
+                    cost_usd=0.0,
+                )
             return cached[1]
         if cached and cached[0] <= now:
             self._cache.pop(cache_key, None)
@@ -246,15 +279,29 @@ class LLMDetector:
         last_error: Optional[Exception] = None
         for attempt in range(1, self._max_attempts + 1):
             try:
+                call_start = time.perf_counter()
                 raw_response = await asyncio.wait_for(
                     self._invoke_classifier(prompt),
                     timeout=self.config.timeout,
                 )
-                result = self._parse_response(raw_response)
+                call_latency_ms = (time.perf_counter() - call_start) * 1000
+                result = self._parse_response(raw_response[0])
                 self._cache[cache_key] = (
                     time.monotonic() + self._cache_ttl_seconds,
                     result,
                 )
+                if self._scan_logger is not None:
+                    meta = raw_response[1]
+                    self._scan_logger.llm_classified(
+                        content_hash=cache_key[:16],
+                        model=str(meta.get("model", self._default_model)),
+                        tokens_used=int(meta.get("tokens_used", 0) or 0),
+                        latency_ms=round(call_latency_ms, 2),
+                        result=result.is_injection,
+                        confidence=result.confidence,
+                        cache_hit=False,
+                        cost_usd=meta.get("cost_usd"),
+                    )
                 return result
             except Exception as exc:
                 last_error = exc
@@ -276,14 +323,18 @@ class LLMDetector:
             raise last_error
         raise RuntimeError("LLM detector failed without specific exception")
 
-    async def _invoke_classifier(self, prompt: str) -> str:
+    async def _invoke_classifier(self, prompt: str) -> Tuple[str, Dict[str, Any]]:
         if self._classifier_fn is None:
             raise RuntimeError("LLM classifier is not configured")
         classifier = cast(Callable[[str], Any], self._classifier_fn)
         response = classifier(prompt)
         if inspect.isawaitable(response):
             response = await response
-        return str(response)
+        if isinstance(response, dict):
+            return str(response.get("text", "")), response
+        if isinstance(response, tuple) and len(response) == 2 and isinstance(response[1], dict):
+            return str(response[0]), cast(Dict[str, Any], response[1])
+        return str(response), {}
 
     @staticmethod
     def _is_transient(exc: Exception) -> bool:

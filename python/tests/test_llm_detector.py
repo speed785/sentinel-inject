@@ -2,7 +2,8 @@ import asyncio
 
 import pytest
 
-from sentinel_inject.llm_detector import LLMDetector, LLMDetectorConfig
+from sentinel_inject.llm_detector import LLMDetector, LLMDetectorConfig  # pyright: ignore[reportImplicitRelativeImport]
+from sentinel_inject.observability import ScanLogger  # pyright: ignore[reportImplicitRelativeImport]
 
 
 @pytest.mark.asyncio
@@ -64,3 +65,30 @@ def test_strict_json_fallback_does_not_use_fragile_true_heuristic():
     result = detector.detect("anything")
     assert result.used_fallback
     assert not result.is_injection
+
+
+@pytest.mark.asyncio
+async def test_llm_observability_counts_calls_and_cache_hits():
+    calls = {"count": 0}
+
+    async def classifier(_: str):
+        calls["count"] += 1
+        return {
+            "text": '{"is_injection": true, "confidence": 0.95, "reason": "attack", "attack_type": "override"}',
+            "tokens_used": 200,
+            "model": "test-model",
+            "cost_usd": 0.002,
+        }
+
+    detector = LLMDetector(classifier_fn=classifier)
+    scan_logger = ScanLogger()
+    detector.set_scan_logger(scan_logger)
+
+    first = await detector.detect_async("same content")
+    second = await detector.detect_async("same content")
+
+    assert first.is_injection
+    assert second.is_injection
+    assert calls["count"] == 1
+    assert scan_logger.metrics.llm_calls == 1
+    assert scan_logger.metrics.llm_cost_usd >= 0.002

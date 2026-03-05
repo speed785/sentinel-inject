@@ -22,6 +22,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from .llm_detector import LLMDetector, LLMDetectorConfig, LLMDetectionResult
+from .observability import AuditTrail, ScanLogger
 from .rules import RuleEngine, RuleMatch, Rule, RuleSeverity
 from .sanitizer import Sanitizer, SanitizationMode
 
@@ -71,6 +72,7 @@ class ScanResult:
     content_hash: str = ""
     scan_duration_ms: float = 0.0
     metadata: Dict[str, Any] = field(default_factory=dict)
+    rule_explanations: List[Dict[str, Any]] = field(default_factory=list)
 
     def summary(self) -> str:
         """Return a human-readable one-line summary."""
@@ -84,6 +86,20 @@ class ScanResult:
 
     def __repr__(self) -> str:
         return self.summary()
+
+
+@dataclass
+class ScannerConfig:
+    llm_detector: Optional[LLMDetector] = None
+    sanitization_mode: SanitizationMode = SanitizationMode.LABEL
+    custom_rules: Optional[List[Rule]] = None
+    rules_threat_threshold: float = 0.50
+    llm_threat_threshold: float = 0.75
+    use_llm_for_suspicious: bool = True
+    sanitize_safe_content: bool = False
+    debug_mode: bool = False
+    scan_logger: Optional[ScanLogger] = None
+    audit_trail: Optional[AuditTrail] = None
 
 
 class Scanner:
@@ -119,6 +135,7 @@ class Scanner:
 
     def __init__(
         self,
+        config: Optional[ScannerConfig] = None,
         llm_detector: Optional[LLMDetector] = None,
         sanitization_mode: SanitizationMode = SanitizationMode.LABEL,
         custom_rules: Optional[List[Rule]] = None,
@@ -128,14 +145,34 @@ class Scanner:
         # Behaviour
         use_llm_for_suspicious: bool = True,
         sanitize_safe_content: bool = False,
+        debug_mode: bool = False,
+        scan_logger: Optional[ScanLogger] = None,
+        audit_trail: Optional[AuditTrail] = None,
     ) -> None:
-        self._rule_engine = RuleEngine(custom_rules=custom_rules)
-        self._llm_detector = llm_detector
-        self._sanitizer = Sanitizer(mode=sanitization_mode)
-        self.rules_threat_threshold = rules_threat_threshold
-        self.llm_threat_threshold = llm_threat_threshold
-        self.use_llm_for_suspicious = use_llm_for_suspicious
-        self.sanitize_safe_content = sanitize_safe_content
+        cfg = config or ScannerConfig(
+            llm_detector=llm_detector,
+            sanitization_mode=sanitization_mode,
+            custom_rules=custom_rules,
+            rules_threat_threshold=rules_threat_threshold,
+            llm_threat_threshold=llm_threat_threshold,
+            use_llm_for_suspicious=use_llm_for_suspicious,
+            sanitize_safe_content=sanitize_safe_content,
+            debug_mode=debug_mode,
+            scan_logger=scan_logger,
+            audit_trail=audit_trail,
+        )
+        self._rule_engine = RuleEngine(custom_rules=cfg.custom_rules)
+        self._llm_detector = cfg.llm_detector
+        self._sanitizer = Sanitizer(mode=cfg.sanitization_mode)
+        self.rules_threat_threshold = cfg.rules_threat_threshold
+        self.llm_threat_threshold = cfg.llm_threat_threshold
+        self.use_llm_for_suspicious = cfg.use_llm_for_suspicious
+        self.sanitize_safe_content = cfg.sanitize_safe_content
+        self.debug_mode = cfg.debug_mode
+        self._scan_logger = cfg.scan_logger
+        self._audit_trail = cfg.audit_trail
+        if self._llm_detector is not None:
+            self._llm_detector.set_scan_logger(self._scan_logger)
 
     # ------------------------------------------------------------------
     # Public API
@@ -160,11 +197,23 @@ class Scanner:
         """
         t0 = time.perf_counter()
         content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
+        meta = metadata or {}
+        if self._scan_logger is not None:
+            self._scan_logger.scan_started(content_hash=content_hash, metadata=meta)
 
         # ---- Layer 1: Rule-based detection --------------------------------
         rule_matches = self._rule_engine.scan(content)
         rules_confidence = self._aggregate_rule_confidence(rule_matches)
         rule_threat = rules_confidence >= self.rules_threat_threshold
+        if self._scan_logger is not None:
+            for rule_match in rule_matches:
+                self._scan_logger.rule_matched(
+                    content_hash=content_hash,
+                    rule_id=rule_match.rule_id,
+                    reason=self._rule_match_reason(rule_match),
+                    confidence=rules_confidence,
+                )
+        rule_explanations = self._build_rule_explanations(rule_matches)
 
         # ---- Layer 2: LLM detection (conditional) -------------------------
         llm_result: Optional[LLMDetectionResult] = None
@@ -208,8 +257,44 @@ class Scanner:
             llm_result=llm_result,
             content_hash=content_hash,
             scan_duration_ms=round(scan_duration_ms, 2),
-            metadata=metadata or {},
+            metadata=meta,
+            rule_explanations=rule_explanations if self.debug_mode else [],
         )
+
+        rule_ids_fired = [m.rule_id for m in rule_matches]
+        action_taken = "allow"
+        if is_threat and self._sanitizer.mode == SanitizationMode.BLOCK:
+            action_taken = "blocked"
+        elif is_threat:
+            action_taken = "sanitized"
+
+        if self._scan_logger is not None:
+            self._scan_logger.scan_complete(
+                content_hash=content_hash,
+                rule_ids_fired=rule_ids_fired,
+                confidence=confidence,
+                action_taken=action_taken,
+                latency_ms=result.scan_duration_ms,
+                injection_detected=is_threat,
+                injection_blocked=action_taken == "blocked",
+            )
+            if action_taken == "blocked":
+                self._scan_logger.injection_blocked(
+                    content_hash=content_hash,
+                    rule_ids_fired=rule_ids_fired,
+                    confidence=confidence,
+                    latency_ms=result.scan_duration_ms,
+                )
+
+        if self._audit_trail is not None:
+            self._audit_trail.append_scan(
+                content_hash=content_hash,
+                rule_ids_fired=rule_ids_fired,
+                confidence=confidence,
+                action_taken=action_taken,
+                latency_ms=result.scan_duration_ms,
+                metadata=meta,
+            )
 
         if is_threat:
             logger.warning(
@@ -230,10 +315,22 @@ class Scanner:
     ) -> ScanResult:
         t0 = time.perf_counter()
         content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
+        meta = metadata or {}
+        if self._scan_logger is not None:
+            self._scan_logger.scan_started(content_hash=content_hash, metadata=meta)
 
         rule_matches = self._rule_engine.scan(content)
         rules_confidence = self._aggregate_rule_confidence(rule_matches)
         rule_threat = rules_confidence >= self.rules_threat_threshold
+        if self._scan_logger is not None:
+            for rule_match in rule_matches:
+                self._scan_logger.rule_matched(
+                    content_hash=content_hash,
+                    rule_id=rule_match.rule_id,
+                    reason=self._rule_match_reason(rule_match),
+                    confidence=rules_confidence,
+                )
+        rule_explanations = self._build_rule_explanations(rule_matches)
 
         llm_result: Optional[LLMDetectionResult] = None
 
@@ -274,8 +371,44 @@ class Scanner:
             llm_result=llm_result,
             content_hash=content_hash,
             scan_duration_ms=round(scan_duration_ms, 2),
-            metadata=metadata or {},
+            metadata=meta,
+            rule_explanations=rule_explanations if self.debug_mode else [],
         )
+
+        rule_ids_fired = [m.rule_id for m in rule_matches]
+        action_taken = "allow"
+        if is_threat and self._sanitizer.mode == SanitizationMode.BLOCK:
+            action_taken = "blocked"
+        elif is_threat:
+            action_taken = "sanitized"
+
+        if self._scan_logger is not None:
+            self._scan_logger.scan_complete(
+                content_hash=content_hash,
+                rule_ids_fired=rule_ids_fired,
+                confidence=confidence,
+                action_taken=action_taken,
+                latency_ms=result.scan_duration_ms,
+                injection_detected=is_threat,
+                injection_blocked=action_taken == "blocked",
+            )
+            if action_taken == "blocked":
+                self._scan_logger.injection_blocked(
+                    content_hash=content_hash,
+                    rule_ids_fired=rule_ids_fired,
+                    confidence=confidence,
+                    latency_ms=result.scan_duration_ms,
+                )
+
+        if self._audit_trail is not None:
+            self._audit_trail.append_scan(
+                content_hash=content_hash,
+                rule_ids_fired=rule_ids_fired,
+                confidence=confidence,
+                action_taken=action_taken,
+                latency_ms=result.scan_duration_ms,
+                metadata=meta,
+            )
 
         if is_threat:
             logger.warning(
@@ -311,6 +444,27 @@ class Scanner:
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _rule_match_reason(match: RuleMatch) -> str:
+        if match.match_type == "keyword":
+            return "keyword matched"
+        return "pattern matched"
+
+    def _build_rule_explanations(self, matches: List[RuleMatch]) -> List[Dict[str, Any]]:
+        explanations: List[Dict[str, Any]] = []
+        for match in matches:
+            explanations.append(
+                {
+                    "rule_id": match.rule_id,
+                    "rule_name": match.rule_name,
+                    "why": self._rule_match_reason(match),
+                    "description": match.description,
+                    "match_start": match.start,
+                    "match_end": match.end,
+                }
+            )
+        return explanations
 
     @staticmethod
     def _aggregate_rule_confidence(matches: List[RuleMatch]) -> float:

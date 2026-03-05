@@ -55,6 +55,7 @@ class RuleMatch:
     start: int
     end: int
     description: str
+    match_type: str = "pattern"
 
     @property
     def severity_score(self) -> float:
@@ -338,6 +339,7 @@ class RuleEngine:
                             start=m.start(),
                             end=m.end(),
                             description=rule.description,
+                            match_type="pattern",
                         )
                     )
             elif rule.keyword_patterns:
@@ -353,6 +355,7 @@ class RuleEngine:
                                 start=m.start(),
                                 end=m.end(),
                                 description=rule.description,
+                                match_type="keyword",
                             )
                         )
                         break  # one match per keyword rule is enough
