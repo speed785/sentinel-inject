@@ -24,20 +24,25 @@
     "prepublishOnly": "npm run build"
   },
   "keywords": [
-    "prompt injection",
-    "AI security",
-    "LLM",
-    "agent security",
-    "content filtering",
+    "ai",
+    "agent",
+    "llm",
+    "security",
+    "prompt-injection",
     "middleware",
     "openai",
-    "langchain"
+    "anthropic",
+    "langchain",
+    "safety",
+    "scanner",
+    "detection",
+    "jailbreak"
   ],
   "author": "sentinel-inject contributors",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/speed785/sentinel-inject"
+    "url": "git+https://github.com/speed785/sentinel-inject.git"
   },
   "peerDependencies": {
     "openai": ">=4.0.0",
@@ -61,5 +66,9 @@
   "jest": {
     "preset": "ts-jest",
     "testEnvironment": "node"
+  },
+  "homepage": "https://github.com/speed785/sentinel-inject#readme",
+  "bugs": {
+    "url": "https://github.com/speed785/sentinel-inject/issues"
   }
 }

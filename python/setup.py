@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 with open("../README.md", encoding="utf-8") as f:
     long_description = f.read()
 
-setup(
+_ = setup(
     name="sentinel-inject",
     version="0.1.0",
     author="sentinel-inject contributors",
@@ -48,7 +48,18 @@ setup(
         "Typing :: Typed",
     ],
     keywords=[
-        "prompt injection", "AI security", "LLM", "agent security",
-        "content filtering", "middleware", "openai", "langchain",
+        "ai",
+        "agent",
+        "llm",
+        "security",
+        "prompt-injection",
+        "middleware",
+        "openai",
+        "anthropic",
+        "langchain",
+        "safety",
+        "scanner",
+        "detection",
+        "jailbreak",
     ],
 )
