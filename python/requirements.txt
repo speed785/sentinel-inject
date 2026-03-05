@@ -1,0 +1,14 @@
+# sentinel-inject core has no required dependencies.
+# Install optional extras based on your integration needs:
+#
+#   pip install sentinel-inject[openai]      - OpenAI integration
+#   pip install sentinel-inject[anthropic]   - Anthropic Claude integration
+#   pip install sentinel-inject[langchain]   - LangChain integration
+#   pip install sentinel-inject[all]         - All integrations
+#
+# Development dependencies:
+pytest>=7.0
+pytest-asyncio>=0.21
+black>=23.0
+ruff>=0.1.0
+mypy>=1.0
