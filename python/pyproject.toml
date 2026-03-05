@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta:__legacy__"
+
+[project]
+name = "sentinel-inject"
+version = "0.1.0"
+description = "Prompt injection scanner middleware for AI agents"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+keywords = [
+  "ai",
+  "agent",
+  "llm",
+  "security",
+  "prompt-injection",
+  "middleware",
+  "openai",
+  "anthropic",
+  "langchain",
+  "safety",
+  "scanner",
+  "detection",
+  "jailbreak",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Security",
+  "Topic :: Software Development :: Libraries",
+  "Typing :: Typed",
+]
+dependencies = []
+
+[project.optional-dependencies]
+openai = ["openai>=1.0.0"]
+anthropic = ["anthropic>=0.20.0"]
+langchain = ["langchain-core>=0.1.0"]
+all = ["openai>=1.0.0", "anthropic>=0.20.0", "langchain-core>=0.1.0"]
+dev = ["pytest>=7.0", "pytest-asyncio", "pytest-cov", "black", "ruff", "mypy"]
+
+[project.urls]
+Homepage = "https://speed785.github.io/sentinel-inject"
+Documentation = "https://speed785.github.io/sentinel-inject"
+Repository = "https://github.com/speed785/sentinel-inject"
+Issues = "https://github.com/speed785/sentinel-inject/issues"
+Changelog = "https://github.com/speed785/sentinel-inject/blob/main/CHANGELOG.md"
+
+[tool.pytest.ini_options]
+addopts = "--cov-fail-under=100"
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+
+[tool.mypy]
+python_version = "3.9"
+strict = false
+ignore_missing_imports = true

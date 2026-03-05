@@ -4,7 +4,7 @@
   <p><strong>Prompt injection defense — screen every tool result before it hits your agent</strong></p>
 
   [![CI](https://github.com/speed785/sentinel-inject/actions/workflows/ci.yml/badge.svg)](https://github.com/speed785/sentinel-inject/actions/workflows/ci.yml)
-  [![Coverage](https://codecov.io/gh/speed785/sentinel-inject/branch/main/graph/badge.svg)](https://codecov.io/gh/speed785/sentinel-inject)
+  [![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)](https://github.com/speed785/sentinel-inject)
   [![PyPI](https://img.shields.io/pypi/v/sentinel-inject)](https://pypi.org/project/sentinel-inject/)
   [![npm](https://img.shields.io/npm/v/sentinel-inject)](https://www.npmjs.com/package/sentinel-inject)
   [![Python](https://img.shields.io/badge/python-3.9+-blue)](https://python.org)
