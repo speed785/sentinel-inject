@@ -242,10 +242,9 @@ export class RuleEngine {
       if (!rule.enabled) continue;
 
       if (rule.pattern) {
-        // Reset lastIndex for global patterns
-        rule.pattern.lastIndex = 0;
+        const pattern = new RegExp(rule.pattern.source, rule.pattern.flags);
         let m: RegExpExecArray | null;
-        while ((m = rule.pattern.exec(text)) !== null) {
+        while ((m = pattern.exec(text)) !== null) {
           matches.push({
             ruleId: rule.id,
             ruleName: rule.name,
@@ -257,10 +256,9 @@ export class RuleEngine {
           });
           // Prevent infinite loops on zero-length matches
           if (m[0].length === 0) {
-            rule.pattern.lastIndex++;
+            pattern.lastIndex++;
           }
         }
-        rule.pattern.lastIndex = 0;
       } else if (rule.keywords) {
         for (const kw of rule.keywords) {
           // Use word-boundary regex for accurate keyword matching
