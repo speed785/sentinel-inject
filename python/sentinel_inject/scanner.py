@@ -19,7 +19,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from .llm_detector import LLMDetector, LLMDetectorConfig, LLMDetectionResult
 from .rules import RuleEngine, RuleMatch, Rule, RuleSeverity
@@ -70,7 +70,7 @@ class ScanResult:
     llm_result: Optional[LLMDetectionResult] = None
     content_hash: str = ""
     scan_duration_ms: float = 0.0
-    metadata: Dict = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def summary(self) -> str:
         """Return a human-readable one-line summary."""
@@ -144,7 +144,7 @@ class Scanner:
     def scan(
         self,
         content: str,
-        metadata: Optional[Dict] = None,
+        metadata: Optional[Dict[str, Any]] = None,
         force_llm: bool = False,
     ) -> ScanResult:
         """
@@ -169,7 +169,7 @@ class Scanner:
         # ---- Layer 2: LLM detection (conditional) -------------------------
         llm_result: Optional[LLMDetectionResult] = None
 
-        should_run_llm = (
+        if (
             self._llm_detector is not None
             and self._llm_detector.is_configured
             and (
@@ -177,11 +177,10 @@ class Scanner:
                 or rule_threat
                 or (self.use_llm_for_suspicious and rules_confidence > 0.0)
             )
-        )
-
-        if should_run_llm:
+        ):
             try:
-                llm_result = self._llm_detector.detect(content)  # type: ignore[union-attr]
+                detector = self._llm_detector
+                llm_result = detector.detect(content)
             except Exception as exc:
                 logger.warning("LLM detection failed, falling back to rules only: %s", exc)
 
@@ -223,8 +222,74 @@ class Scanner:
 
         return result
 
+    async def async_scan(
+        self,
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None,
+        force_llm: bool = False,
+    ) -> ScanResult:
+        t0 = time.perf_counter()
+        content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
+
+        rule_matches = self._rule_engine.scan(content)
+        rules_confidence = self._aggregate_rule_confidence(rule_matches)
+        rule_threat = rules_confidence >= self.rules_threat_threshold
+
+        llm_result: Optional[LLMDetectionResult] = None
+
+        if (
+            self._llm_detector is not None
+            and self._llm_detector.is_configured
+            and (
+                force_llm
+                or rule_threat
+                or (self.use_llm_for_suspicious and rules_confidence > 0.0)
+            )
+        ):
+            try:
+                detector = self._llm_detector
+                llm_result = await detector.detect_async(content)
+            except Exception as exc:
+                logger.warning("LLM async detection failed, falling back to rules only: %s", exc)
+
+        threat_level, confidence = self._classify(
+            rule_matches, rules_confidence, llm_result
+        )
+        is_threat = threat_level.is_threat
+
+        sanitized: Optional[str] = None
+        if is_threat or self.sanitize_safe_content:
+            spans = [(m.start, m.end) for m in rule_matches]
+            sanitized = self._sanitizer.sanitize(content, match_spans=spans or None)
+
+        scan_duration_ms = (time.perf_counter() - t0) * 1000
+
+        result = ScanResult(
+            content=content,
+            sanitized_content=sanitized,
+            threat_level=threat_level,
+            confidence=confidence,
+            is_threat=is_threat,
+            rule_matches=rule_matches,
+            llm_result=llm_result,
+            content_hash=content_hash,
+            scan_duration_ms=round(scan_duration_ms, 2),
+            metadata=metadata or {},
+        )
+
+        if is_threat:
+            logger.warning(
+                "Injection detected | hash=%s confidence=%.0f%% rules=%d %s",
+                content_hash,
+                confidence * 100,
+                len(rule_matches),
+                f"llm={llm_result.attack_type}" if llm_result and llm_result.is_injection else "",
+            )
+
+        return result
+
     def scan_batch(
-        self, contents: List[str], metadata: Optional[List[Optional[Dict]]] = None
+        self, contents: List[str], metadata: Optional[List[Optional[Dict[str, Any]]]] = None
     ) -> List[ScanResult]:
         """Scan multiple content items. Returns results in the same order."""
         metas = metadata or [None] * len(contents)

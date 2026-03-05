@@ -22,7 +22,7 @@ from __future__ import annotations
 import functools
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional
 
 from .scanner import Scanner, ScanResult, ThreatLevel
 from .sanitizer import SanitizationMode
@@ -101,7 +101,7 @@ class Middleware:
         self,
         content: str,
         tool_name: str = "unknown",
-        metadata: Optional[Dict] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Screen a tool result before it enters the agent context.
@@ -120,11 +120,28 @@ class Middleware:
 
         return self._handle_result(result, content)
 
+    async def async_process_tool_result(
+        self,
+        content: str,
+        tool_name: str = "unknown",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        is_high_risk = any(
+            hr in tool_name.lower() for hr in self.config.high_risk_sources
+        )
+        force_llm = self.config.force_llm_for_high_risk and is_high_risk
+
+        meta = {"source": "tool_result", "tool_name": tool_name, **(metadata or {})}
+        result = await self._scanner.async_scan(content, metadata=meta, force_llm=force_llm)
+        self._scan_history.append(result)
+
+        return self._handle_result(result, content)
+
     def process_user_input(
         self,
         content: str,
         user_id: Optional[str] = None,
-        metadata: Optional[Dict] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Screen user input before it enters the agent context.
@@ -140,11 +157,26 @@ class Middleware:
 
         return self._handle_result(result, content)
 
+    async def async_process_user_input(
+        self,
+        content: str,
+        user_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        if not self.config.scan_user_input:
+            return content
+
+        meta = {"source": "user_input", "user_id": user_id, **(metadata or {})}
+        result = await self._scanner.async_scan(content, metadata=meta)
+        self._scan_history.append(result)
+
+        return self._handle_result(result, content)
+
     def process_web_content(
         self,
         content: str,
         url: Optional[str] = None,
-        metadata: Optional[Dict] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Screen fetched web content (highest risk category).
@@ -157,15 +189,39 @@ class Middleware:
 
         return self._handle_result(result, content)
 
+    async def async_process_web_content(
+        self,
+        content: str,
+        url: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        meta = {"source": "web_content", "url": url, **(metadata or {})}
+        result = await self._scanner.async_scan(content, metadata=meta, force_llm=True)
+        self._scan_history.append(result)
+
+        return self._handle_result(result, content)
+
     def process_document(
         self,
         content: str,
         doc_name: Optional[str] = None,
-        metadata: Optional[Dict] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Screen document content (PDF, file reads, etc.)."""
         meta = {"source": "document", "doc_name": doc_name, **(metadata or {})}
         result = self._scanner.scan(content, metadata=meta)
+        self._scan_history.append(result)
+
+        return self._handle_result(result, content)
+
+    async def async_process_document(
+        self,
+        content: str,
+        doc_name: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        meta = {"source": "document", "doc_name": doc_name, **(metadata or {})}
+        result = await self._scanner.async_scan(content, metadata=meta)
         self._scan_history.append(result)
 
         return self._handle_result(result, content)
@@ -177,11 +233,17 @@ class Middleware:
         """
         return self._scanner.scan(content, **kwargs)
 
+    def screen(self, content: str, **kwargs: Any) -> ScanResult:
+        return self.scan(content, **kwargs)
+
+    async def async_screen(self, content: str, **kwargs: Any) -> ScanResult:
+        return await self._scanner.async_scan(content, **kwargs)
+
     # ------------------------------------------------------------------
     # Decorator / wrapper utilities
     # ------------------------------------------------------------------
 
-    def wrap_tool(self, tool_name: Optional[str] = None) -> Callable:
+    def wrap_tool(self, tool_name: Optional[str] = None) -> Callable[..., Any]:
         """
         Decorator that wraps a tool function to screen its output.
 
@@ -195,7 +257,7 @@ class Middleware:
             safe_fn = mw.wrap_tool("web_search")(original_fn)
         """
 
-        def decorator(fn: Callable) -> Callable:
+        def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
             name = tool_name or fn.__name__
 
             @functools.wraps(fn)

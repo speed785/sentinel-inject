@@ -16,10 +16,16 @@ degrades when no LLM client is configured.
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import inspect
 import json
 import logging
+import re
+import threading
+import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple, cast
 
 logger = logging.getLogger("sentinel_inject.llm_detector")
 
@@ -116,11 +122,14 @@ class LLMDetector:
 
     def __init__(
         self,
-        classifier_fn: Optional[Callable[[str], str]] = None,
+        classifier_fn: Optional[Callable[[str], Any]] = None,
         config: Optional[LLMDetectorConfig] = None,
     ) -> None:
         self._classifier_fn = classifier_fn
         self.config = config or LLMDetectorConfig()
+        self._cache: Dict[str, Tuple[float, LLMDetectionResult]] = {}
+        self._cache_ttl_seconds = 300.0
+        self._max_attempts = 3
 
     # ------------------------------------------------------------------
     # Factory helpers
@@ -140,7 +149,7 @@ class LLMDetector:
         Works with openai, azure openai, groq, together, ollama, etc.
         """
         try:
-            import openai
+            openai = __import__("openai")
         except ImportError as exc:
             raise ImportError(
                 "openai package is required for LLMDetector.from_openai(). "
@@ -181,7 +190,7 @@ class LLMDetector:
     ) -> "LLMDetector":
         """Create a detector backed by Anthropic Claude."""
         try:
-            import anthropic
+            anthropic = __import__("anthropic")
         except ImportError as exc:
             raise ImportError(
                 "anthropic package is required for LLMDetector.from_anthropic(). "
@@ -208,12 +217,9 @@ class LLMDetector:
     # ------------------------------------------------------------------
 
     def detect(self, content: str) -> LLMDetectionResult:
-        """
-        Classify content for prompt injection.
+        return self._run_sync(self.detect_async(content))
 
-        Returns an LLMDetectionResult. If no classifier is configured,
-        returns a safe default (not injection) with used_fallback=True.
-        """
+    async def detect_async(self, content: str) -> LLMDetectionResult:
         if self._classifier_fn is None:
             return LLMDetectionResult(
                 is_injection=False,
@@ -223,64 +229,150 @@ class LLMDetector:
                 used_fallback=True,
             )
 
-        # Truncate long content
+        now = time.monotonic()
+        cache_key = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        cached = self._cache.get(cache_key)
+        if cached and cached[0] > now:
+            return cached[1]
+        if cached and cached[0] <= now:
+            self._cache.pop(cache_key, None)
+
         truncated = content[: self.config.max_content_length]
         if len(content) > self.config.max_content_length:
             truncated += "\n[... content truncated for classification ...]"
 
         prompt = _CLASSIFICATION_USER_TEMPLATE.format(content=truncated)
 
-        try:
-            raw_response = self._classifier_fn(prompt)
-            return self._parse_response(raw_response)
-        except Exception as exc:
-            logger.warning("LLM detector call failed: %s", exc)
-            if self.config.graceful_fallback:
-                return LLMDetectionResult(
-                    is_injection=False,
-                    confidence=0.0,
-                    reason=f"LLM call failed: {exc}",
-                    attack_type=None,
-                    used_fallback=True,
-                    error=str(exc),
+        last_error: Optional[Exception] = None
+        for attempt in range(1, self._max_attempts + 1):
+            try:
+                raw_response = await asyncio.wait_for(
+                    self._invoke_classifier(prompt),
+                    timeout=self.config.timeout,
                 )
-            raise
+                result = self._parse_response(raw_response)
+                self._cache[cache_key] = (
+                    time.monotonic() + self._cache_ttl_seconds,
+                    result,
+                )
+                return result
+            except Exception as exc:
+                last_error = exc
+                if attempt >= self._max_attempts or not self._is_transient(exc):
+                    break
+                await asyncio.sleep(0.25 * (2 ** (attempt - 1)))
+
+        logger.warning("LLM detector call failed: %s", last_error)
+        if self.config.graceful_fallback:
+            return LLMDetectionResult(
+                is_injection=False,
+                confidence=0.0,
+                reason=f"LLM call failed: {last_error}",
+                attack_type=None,
+                used_fallback=True,
+                error=str(last_error),
+            )
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("LLM detector failed without specific exception")
+
+    async def _invoke_classifier(self, prompt: str) -> str:
+        if self._classifier_fn is None:
+            raise RuntimeError("LLM classifier is not configured")
+        classifier = cast(Callable[[str], Any], self._classifier_fn)
+        response = classifier(prompt)
+        if inspect.isawaitable(response):
+            response = await response
+        return str(response)
+
+    @staticmethod
+    def _is_transient(exc: Exception) -> bool:
+        transient_types = (TimeoutError, ConnectionError, OSError, asyncio.TimeoutError)
+        if isinstance(exc, transient_types):
+            return True
+        text = str(exc).lower()
+        transient_markers = ("timeout", "temporar", "connection reset", "rate limit", "429")
+        return any(marker in text for marker in transient_markers)
+
+    @staticmethod
+    def _run_sync(coro: Any) -> "LLMDetectionResult":
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(coro)
+
+        result_box: Dict[str, Any] = {}
+
+        def _runner() -> None:
+            try:
+                result_box["result"] = asyncio.run(coro)
+            except Exception as exc:  # pragma: no cover - defensive path
+                result_box["error"] = exc
+
+        thread = threading.Thread(target=_runner, daemon=True)
+        thread.start()
+        thread.join()
+
+        if "error" in result_box:
+            raise result_box["error"]
+        return result_box["result"]
 
     def _parse_response(self, raw: str) -> LLMDetectionResult:
         """Parse the JSON response from the classifier LLM."""
-        # Strip markdown code fences if present
         raw = raw.strip()
         if raw.startswith("```"):
             raw = "\n".join(raw.split("\n")[1:])
             raw = raw.rstrip("`").strip()
 
+        payload: Optional[Dict[str, Any]] = None
         try:
-            data = json.loads(raw)
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                payload = parsed
         except json.JSONDecodeError:
-            logger.warning("Could not parse LLM response as JSON: %r", raw)
-            # Try to extract is_injection from raw text as fallback
-            is_inj = "true" in raw.lower() and "is_injection" in raw.lower()
+            pass
+
+        if payload is None:
+            match = re.search(r"\{.*\}", raw, re.DOTALL)
+            if match:
+                try:
+                    parsed = json.loads(match.group(0))
+                    if isinstance(parsed, dict):
+                        payload = parsed
+                except json.JSONDecodeError:
+                    payload = None
+
+        if payload is None:
             return LLMDetectionResult(
-                is_injection=is_inj,
-                confidence=0.5 if is_inj else 0.0,
+                is_injection=False,
+                confidence=0.0,
                 reason="Could not parse structured response",
                 attack_type=None,
                 used_fallback=True,
                 error=f"JSON parse error on: {raw[:100]}",
             )
 
-        confidence = float(data.get("confidence", 0.0))
-        is_injection = bool(data.get("is_injection", False))
+        confidence_raw = payload.get("confidence", 0.0)
+        try:
+            confidence = float(confidence_raw)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        confidence = max(0.0, min(confidence, 1.0))
 
-        # Apply threshold: even if LLM says is_injection=True, respect threshold
+        is_injection_raw = payload.get("is_injection", False)
+        if isinstance(is_injection_raw, bool):
+            is_injection = is_injection_raw
+        else:
+            is_injection = str(is_injection_raw).strip().lower() == "true"
+
         if confidence < self.config.confidence_threshold:
             is_injection = False
 
         return LLMDetectionResult(
             is_injection=is_injection,
             confidence=confidence,
-            reason=data.get("reason", ""),
-            attack_type=data.get("attack_type"),
+            reason=str(payload.get("reason", "")),
+            attack_type=payload.get("attack_type") if payload.get("attack_type") else None,
         )
 
     @property

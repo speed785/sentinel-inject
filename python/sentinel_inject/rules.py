@@ -26,9 +26,16 @@ class Rule:
     name: str
     description: str
     severity: RuleSeverity
-    pattern: Optional[Pattern] = None
+    pattern: Optional[Pattern[str]] = None
     keywords: List[str] = field(default_factory=list)
+    keyword_patterns: List[Pattern[str]] = field(default_factory=list, init=False, repr=False)
     enabled: bool = True
+
+    def __post_init__(self) -> None:
+        self.keyword_patterns = [
+            re.compile(r"\b" + re.escape(kw) + r"\b", re.IGNORECASE)
+            for kw in self.keywords
+        ]
 
     def matches(self, text: str) -> bool:
         lower = text.lower()
@@ -333,10 +340,8 @@ class RuleEngine:
                             description=rule.description,
                         )
                     )
-            elif rule.keywords:
-                for kw in rule.keywords:
-                    # Use word-boundary regex for accurate keyword matching
-                    kw_pattern = re.compile(r"\b" + re.escape(kw) + r"\b", re.IGNORECASE)
+            elif rule.keyword_patterns:
+                for kw_pattern in rule.keyword_patterns:
                     m = kw_pattern.search(text)
                     if m:
                         matches.append(
