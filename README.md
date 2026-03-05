@@ -3,12 +3,13 @@
   <h1>sentinel-inject</h1>
   <p><strong>Prompt injection defense — screen every tool result before it hits your agent</strong></p>
 
-[![PyPI version](https://img.shields.io/pypi/v/sentinel-inject.svg)](https://pypi.org/project/sentinel-inject/)
-[![npm version](https://img.shields.io/npm/v/sentinel-inject.svg)](https://www.npmjs.com/package/sentinel-inject)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue.svg)](https://www.typescriptlang.org/)
-[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)](#)
+  [![CI](https://github.com/speed785/sentinel-inject/actions/workflows/ci.yml/badge.svg)](https://github.com/speed785/sentinel-inject/actions/workflows/ci.yml)
+  [![Coverage](https://codecov.io/gh/speed785/sentinel-inject/branch/main/graph/badge.svg)](https://codecov.io/gh/speed785/sentinel-inject)
+  [![PyPI](https://img.shields.io/pypi/v/sentinel-inject)](https://pypi.org/project/sentinel-inject/)
+  [![npm](https://img.shields.io/npm/v/sentinel-inject)](https://www.npmjs.com/package/sentinel-inject)
+  [![Python](https://img.shields.io/badge/python-3.9+-blue)](https://python.org)
+  [![TypeScript](https://img.shields.io/badge/typescript-5.0+-blue)](https://typescriptlang.org)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
 
